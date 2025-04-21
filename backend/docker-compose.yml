@@ -1,0 +1,165 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:14.12
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_DB: "oko-freevigilance"
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "pass1234"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - microservice-network
+
+  master:
+    image: chrislusf/seaweedfs
+    container_name: master
+    ports:
+      - "9333:9333"
+      - "19333:19333"
+      - "9324:9324"
+    command: "master -ip=master -ip.bind=0.0.0.0 -metricsPort=9324"
+    networks:
+      - microservice-network
+
+  volume:
+    image: chrislusf/seaweedfs
+    container_name: volume
+    ports:
+      - "8080:8080"
+      - "18080:18080"
+      - "9325:9325"
+    command: 'volume -mserver="master:9333" -ip.bind=0.0.0.0 -port=8080 -metricsPort=9325'
+    depends_on:
+      - master
+    networks:
+      - microservice-network
+
+  filer:
+    image: chrislusf/seaweedfs
+    container_name: filer
+    ports:
+      - "8888:8888"
+      - "18888:18888"
+      - "9326:9326"
+    command: 'filer -master="master:9333" -ip.bind=0.0.0.0 -metricsPort=9326'
+    tty: true
+    stdin_open: true
+    depends_on:
+      - master
+      - volume
+    networks:
+      - microservice-network
+
+  s3:
+    image: chrislusf/seaweedfs
+    container_name: s3
+    ports:
+      - "8333:8333"
+      - "9327:9327"
+    environment:
+      AWS_ACCESS_KEY_ID: "s3"
+      AWS_SECRET_ACCESS_KEY: "pass1234"
+    command: 's3 -filer="filer:8888" -ip.bind=0.0.0.0 -metricsPort=9327'
+    depends_on:
+      - master
+      - volume
+      - filer
+    networks:
+      - microservice-network
+  
+  promtail:
+    image: grafana/promtail:2.7.0
+    container_name: promtail
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/config.yml
+      - app_logs:/var/log/microservice:ro
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - microservice-network
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:2.7.0
+    container_name: loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/config.yml
+      - loki_data:/tmp/loki
+    command: -config.file=/etc/loki/config.yml
+    networks:
+      - microservice-network
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:9.4.7
+    container_name: grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - microservice-network
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  api:
+    build:
+      context: backend
+      dockerfile: Dockerfile
+    container_name: api
+    ports:
+      - "8083:8083"
+    environment:
+      - CONFIG_FILE=/app/config/docker.yaml
+    depends_on:
+      - postgres
+      - master
+      - volume
+      - filer
+      - s3
+      - grafana
+      - loki
+      - promtail
+    networks:
+      - microservice-network
+
+  bot:
+    build:
+      context: telegram_bot
+      dockerfile: Dockerfile
+    container_name: telegram_bot
+    ports:
+      - "8084:8084"
+    environment:
+      - BOT_CONFIG_FILE=/config/config.yaml
+    depends_on:
+      - grafana
+      - loki
+      - promtail
+    networks:
+      - microservice-network
+
+volumes:
+  app_logs:
+  daemon_temp:
+  grafana_data:
+  loki_data:
+  postgres_data:
+
+networks:
+  microservice-network:
+    driver: bridge
