@@ -1,0 +1,44 @@
+{
+    "$schema": "https://json.schemastore.org/tsconfig",
+    "compilerOptions": {
+        "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+        "target": "ESNext",
+        "useDefineForClassFields": true,
+        "lib": ["ES2022", "DOM", "DOM.Iterable"],
+        "module": "ESNext",
+        "skipLibCheck": true,
+
+        "esModuleInterop": true,
+        "allowSyntheticDefaultImports": true,
+
+        /* Bundler mode */
+        "moduleResolution": "bundler",
+        "isolatedModules": true,
+        "moduleDetection": "force",
+        "noEmit": true,
+        "jsx": "react-jsx",
+
+        "sourceMap": true,
+
+        /* Linting */
+        "strict": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "noFallthroughCasesInSwitch": true,
+        "noUncheckedSideEffectImports": true,
+        "baseUrl": ".",
+        "paths": {
+            "public/*": ["./public/*"],
+            "~/*": ["src/*"]
+        }
+    },
+    "exclude": ["node_modules"],
+    "include": [
+        "src",
+        ".storybook",
+        "tests",
+        "vite.config.ts",
+        "playwright.config.ts",
+        "vitest.workspace.ts"
+    ]
+}

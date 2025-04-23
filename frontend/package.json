@@ -1,0 +1,161 @@
+{
+    "name": "oko-ui",
+    "version": "0.0.0",
+    "homepage": "https://github.com/shbov/oko-ui",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/shbov/oko-ui.git"
+    },
+    "license": "MIT",
+    "sideEffects": [
+        "*.scss",
+        "*.css"
+    ],
+    "type": "module",
+    "scripts": {
+        "build": "tsc -b && vite build",
+        "circular-deps": "skott --displayMode=file-tree",
+        "dev": "vite",
+        "preinstall": "npx only-allow pnpm",
+        "lint": "pnpm run --parallel /^lint:/",
+        "lint:eslint": "eslint src --quiet",
+        "lint:prettier": "prettier --check 'src/**/*.{css,scss}'",
+        "lint:styles": "stylelint 'src/**/*.{css,scss}'",
+        "prepare": "husky",
+        "preview": "vite preview",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "test:unit": "vitest run --project unit",
+        "test:storybook": "test-storybook --url ${PR_PREVIEW_URL:-http://localhost:7009}",
+        "test:playwright": "playwright test",
+        "typecheck": "tsc --noEmit",
+        "storybook": "storybook dev -p 7009",
+        "build-storybook": "storybook build -c .storybook -o storybook-static"
+    },
+    "nano-staged": {
+        "*.{css,scss}": [
+            "stylelint --fix --quiet"
+        ],
+        "*.{ts,tsx}": [
+            "eslint --fix --quiet"
+        ],
+        "*.{css,scss,md}": [
+            "prettier --write"
+        ]
+    },
+    "browserslist": [
+        "extends @gravity-ui/browserslist-config"
+    ],
+    "dependencies": {
+        "@bem-react/classname": "^1.6.0",
+        "@bmunozg/react-image-area": "^1.1.0",
+        "@gravity-ui/components": "^4.1.1",
+        "@gravity-ui/data-source": "^0.4.0",
+        "@gravity-ui/icons": "^2.13.0",
+        "@gravity-ui/navigation": "^3.3.4",
+        "@gravity-ui/uikit": "^7.9.1",
+        "@tanstack/react-form": "^0.41.4",
+        "@tanstack/react-query": "^5.74.4",
+        "@tanstack/react-query-devtools": "^5.74.4",
+        "@tanstack/react-router": "^1.116.0",
+        "@tanstack/zod-form-adapter": "^0.41.4",
+        "bem-cn-lite": "^4.1.0",
+        "i18next": "^25.0.1",
+        "ky": "^1.8.1",
+        "lodash": "^4.17.21",
+        "react": "^18.3.1",
+        "react-compare-image": "^3.0.0",
+        "react-compare-slider": "^3.1.0",
+        "react-diff-viewer": "^3.1.1",
+        "react-dom": "^18.3.1",
+        "react-image-diff": "^0.1.0",
+        "react-syntax-highlighter": "^15.6.1",
+        "zod": "^3.24.3"
+    },
+    "devDependencies": {
+        "@chromatic-com/storybook": "^3.2.6",
+        "@commitlint/config-conventional": "^19.8.0",
+        "@eslint/js": "^9.25.0",
+        "@gravity-ui/browserslist-config": "^4.3.0",
+        "@gravity-ui/date-components": "^3.0.3",
+        "@gravity-ui/date-utils": "^2.5.6",
+        "@gravity-ui/illustrations": "^2.1.0",
+        "@playwright/test": "^1.52.0",
+        "@storybook/addon-a11y": "^8.6.12",
+        "@storybook/addon-docs": "^8.6.12",
+        "@storybook/addon-essentials": "^8.6.12",
+        "@storybook/addon-onboarding": "^8.6.12",
+        "@storybook/addon-viewport": "^8.6.12",
+        "@storybook/blocks": "^8.6.12",
+        "@storybook/builder-vite": "^8.6.12",
+        "@storybook/experimental-addon-test": "^8.6.12",
+        "@storybook/manager-api": "^8.6.12",
+        "@storybook/react": "^8.6.12",
+        "@storybook/react-vite": "^8.6.12",
+        "@storybook/test": "^8.6.12",
+        "@storybook/test-runner": "^0.22.0",
+        "@storybook/theming": "^8.6.12",
+        "@tanstack/eslint-plugin-router": "^1.115.0",
+        "@tanstack/react-router-devtools": "^1.116.0",
+        "@tanstack/router-plugin": "^1.116.1",
+        "@testing-library/dom": "^10.4.0",
+        "@testing-library/jest-dom": "^6.6.3",
+        "@testing-library/react": "^16.3.0",
+        "@types/lodash": "^4.17.16",
+        "@types/node": "^22.14.1",
+        "@types/react": "^18.3.20",
+        "@types/react-dom": "^18.3.6",
+        "@types/react-syntax-highlighter": "^15.5.13",
+        "@typescript-eslint/parser": "^8.30.1",
+        "@vitejs/plugin-react-swc": "^3.9.0",
+        "@vitest/browser": "^3.1.1",
+        "@vitest/coverage-v8": "^3.1.1",
+        "@vitest/ui": "^3.1.2",
+        "axe-playwright": "^2.1.0",
+        "concurrently": "^9.1.2",
+        "eslint": "^9.25.0",
+        "eslint-config-prettier": "^9.1.0",
+        "eslint-import-resolver-typescript": "^3.10.0",
+        "eslint-plugin-import-x": "^4.10.6",
+        "eslint-plugin-react": "^7.37.5",
+        "eslint-plugin-react-hooks": "^5.2.0",
+        "eslint-plugin-react-refresh": "^0.4.19",
+        "eslint-plugin-storybook": "^0.12.0",
+        "globals": "^15.15.0",
+        "http-server": "^14.1.1",
+        "husky": "^9.1.7",
+        "identity-obj-proxy": "^3.0.0",
+        "jsdom": "^26.1.0",
+        "playwright": "^1.52.0",
+        "prettier": "^3.5.3",
+        "react-test-renderer": "^19.1.0",
+        "sass-embedded": "^1.86.3",
+        "skott": "^0.35.4",
+        "storybook": "^8.6.12",
+        "stylelint": "^16.18.0",
+        "stylelint-config-standard-scss": "^14.0.0",
+        "ts-node": "^10.9.2",
+        "typescript": "~5.6.3",
+        "typescript-eslint": "^8.30.1",
+        "vite": "^6.3.2",
+        "vitest": "^3.1.1",
+        "wait-on": "^8.0.3"
+    },
+    "engines": {
+        "node": "22",
+        "pnpm": "10"
+    },
+    "pnpm": {
+        "ignoredBuiltDependencies": [
+            "esbuild"
+        ],
+        "onlyBuiltDependencies": [
+            "@swc/core"
+        ]
+    },
+    "eslintConfig": {
+        "extends": [
+            "plugin:storybook/recommended"
+        ]
+    }
+}
