@@ -1,7 +1,7 @@
-from model.resource import Resource
-from config.config import ServerConfig, S3Config
-from util.cron import create_cron_job, update_cron_job, kill_cron_job
-from model.s3_interactor import get_all_files
+from api.model.resource import Resource
+from api.config.config import ServerConfig, S3Config
+from api.util.cron import create_cron_job, update_cron_job, kill_cron_job
+from api.model.s3_interactor import get_all_files
 from datetime import datetime
 from typing import List, Tuple
 from selenium import webdriver
