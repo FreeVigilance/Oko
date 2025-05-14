@@ -46,6 +46,11 @@ from api.model.user import (
     get_user_by_username,
     get_md5,
 )
+from api.model.redis_interactor import (
+    check_jwt,
+    delete_jwt,
+    save_jwt,
+)
 from api.validators import (
     validate_username,
     validate_email,
@@ -87,16 +92,16 @@ from functools import wraps
 import urllib.parse
 from flask_admin import Admin
 from flask_admin.contrib.sqla import ModelView
-from flask_login import (
-    LoginManager,
-    login_user,
-    logout_user,
-    login_required,
-    current_user
-)
+from flask_login import LoginManager
 from werkzeug.security import (
     check_password_hash,
     generate_password_hash
+)
+from flask_admin.form.widgets import Select2Widget
+from flask_login import (
+    login_user,
+    logout_user,
+    current_user
 )
 from api.model.admin_models import (
     db,
@@ -111,6 +116,7 @@ import os
 from dataclasses import dataclass
 import yaml
 import hashlib
+from wtforms import SelectField
 
 # create flask app
 app = Flask(__name__)
@@ -150,6 +156,53 @@ logger.addHandler(console_handler)
 @app.before_request
 def before_request():
     request.request_id = str(uuid.uuid4())
+
+
+@app.before_request
+def load_user_from_jwt():
+    if request.path.startswith('/static') or request.path == '/login' or request.path == '/users/login':
+        return
+    
+    bearer = request.headers.get("Authorization")
+    if bearer and len(bearer.split()) == 2:
+        token = bearer.split()[1]
+        if check_jwt(cfg.redis, token):
+            try:
+                payload = jwt.decode(token, cfg.server.secret_key, algorithms="HS256")
+                email = payload.get("user")
+                
+                if email:
+                    user = get_user_by_email(cfg.postgres, email)
+                    if user and user.is_admin:
+                        login_user(User.query.get(user.id))
+                    elif request.path.startswith('/admin'):
+                        return jsonify({"error": "Admin access required"}), 403
+            except Exception as e:
+                if request.path.startswith('/admin'):
+                    return jsonify({"error": "Invalid token"}), 401
+
+
+@app.before_request
+def check_admin_access():
+    if request.path.startswith('/admin') and not request.path.startswith('/admin/login'):
+        token = None
+        bearer = request.headers.get('Authorization')
+        if bearer and len(bearer.split()) == 2:
+            token = bearer.split()[1]
+        
+        if not token:
+            token = request.cookies.get('admin_token')
+        
+        if not token or not check_jwt(cfg.redis, token):
+            return redirect(url_for('admin_login'))
+        
+        try:
+            email = jwt.decode(token, cfg.server.secret_key, algorithms="HS256")["user"]
+            user = get_user_by_email(cfg.postgres, email)
+            if not user or not user.is_admin:
+                return jsonify({"error": "Admin access required"}), 403
+        except Exception:
+            return redirect(url_for('admin_login'))
 
 
 @app.after_request
@@ -199,7 +252,6 @@ db.init_app(app)
 
 login_manager = LoginManager()
 login_manager.init_app(app)
-login_manager.login_view = 'login'
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -207,10 +259,13 @@ def load_user(user_id):
 
 class AdminModelView(ModelView):
     def is_accessible(self):
-        return True
+        if not current_user.is_authenticated:
+            return False
+        user = get_user_by_id(cfg.postgres, current_user.id)
+        return user.is_admin
 
     def inaccessible_callback(self, name, **kwargs):
-        return redirect(url_for('login', next=request.url))
+        return redirect('/admin/login')
 
 
 class UserModelView(AdminModelView):
@@ -251,10 +306,34 @@ class ChannelResourceModelView(AdminModelView):
     column_filters = ['enabled']
 
 
+
 class MonitoringEventModelView(AdminModelView):
-    column_list = ['id', 'name', 'resource_id', 'created_at', 'status']
-    column_searchable_list = ['name']
-    column_filters = ['status', 'created_at']
+    column_list = ('id', 'name', 'snapshot_id', 'resource_id', 'created_at', 'status')
+    column_searchable_list = ('name',)
+    column_filters = ('status', 'created_at')
+    form_overrides = {
+        'status': SelectField
+    }
+    form_args = {
+        'status': {
+            'choices': [
+                ('CREATED', 'CREATED'),
+                ('NOTIFIED', 'NOTIFIED'),
+                ('WATCHED', 'WATCHED'),
+                ('REACTED', 'REACTED')
+            ]
+        }
+    }
+
+    def create_form(self, obj=None):
+        form = super(MonitoringEventModelView, self).create_form(obj)
+        form.status.widget = Select2Widget()
+        return form
+    
+    def edit_form(self, obj=None):
+        form = super(MonitoringEventModelView, self).edit_form(obj)
+        form.status.widget = Select2Widget()
+        return form
 
 
 admin = Admin(app, name='Admin Panel', template_mode='bootstrap4')
@@ -300,13 +379,17 @@ def token_required(f):
         token = data[1]
         if not token:
             return jsonify({"error": "token is missing"}), 403
+        if not check_jwt(cfg.redis, token) and not cfg.server.debug:
+            return jsonify({"error": "token is invalid/expired"}), 401
         try:
             email = jwt.decode(token, cfg.server.secret_key, algorithms="HS256")["user"]
         except Exception as error:
             return jsonify({"error": "token is invalid/expired"}), 401
         user = get_user_by_email(cfg.postgres, email)
         if user is None:
-            return jsonify({"error": f"user {email} not found"}), 404
+            return jsonify({"error": f"user {email} not found"}), 401
+        if user.deleted_at is not None:
+            return jsonify({"error": f"user {email} was deleted"}), 403
         return f(*args, **kwargs)
 
     return decorated
@@ -408,9 +491,9 @@ def login():
         },
         cfg.server.secret_key,
     )
-    return (
-        jsonify(
-            {
+    save_jwt(cfg.redis, str(token), True, cfg.server.session_duration)
+    return jsonify(
+        {
                 "accessToken": token,
                 "user": {
                     "id": user.id,
@@ -420,9 +503,64 @@ def login():
                     "is_admin": user.is_admin,
                 },
             }
-        ),
-        200,
-    )
+    ), 200
+
+
+@app.route('/admin/login', methods=['GET', 'POST'])
+def admin_login():
+    if request.method == 'POST':
+        email = request.form.get('email')
+        password = request.form.get('password')
+        
+        if not email or not password:
+            flash('Please provide both email and password', 'error')
+            return redirect(url_for('admin_login'))
+            
+        user = get_user_by_email(cfg.postgres, email)
+        password_hash = get_md5(password)
+        
+        if user is None or user.password != password_hash or not user.is_admin:
+            flash('Invalid credentials or insufficient permissions', 'error')
+            return redirect(url_for('admin_login'))
+            
+        # Создаем JWT токен
+        token = jwt.encode(
+            {
+                "user": email,
+                "exp": datetime.datetime.utcnow() + datetime.timedelta(minutes=1440),
+            },
+            cfg.server.secret_key,
+        )
+        save_jwt(cfg.redis, str(token), True, cfg.server.session_duration)
+        
+        # Устанавливаем куки с токеном (альтернатива - использовать localStorage в JS)
+        response = redirect(url_for('admin.index'))
+        response.set_cookie('admin_token', token, httponly=True, secure=True)
+        
+        # Также авторизуем пользователя через Flask-Login
+        login_user(User.query.get(user.id))
+        
+        return response
+        
+    return '''
+    <form method="POST">
+        <div>
+            <label>Email:</label>
+            <input type="email" name="email" required>
+        </div>
+        <div>
+            <label>Password:</label>
+            <input type="password" name="password" required>
+        </div>
+        <button type="submit">Login</button>
+    </form>
+    '''
+
+
+@app.route("/admin/logout", methods=["GET"])
+def logout_admin():
+    logout_user()
+    return redirect('/admin')
 
 
 @app.route("/users/info", methods=["GET"])
@@ -436,7 +574,7 @@ def login():
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "responses": {
@@ -497,6 +635,8 @@ def info():
     token = data[1]
     if not token:
         return jsonify({"error": "token is missing"}), 403
+    if not check_jwt(cfg.redis, token) and not cfg.server.debug:
+        return jsonify({"error": "token is invalid/expired"}), 401
     try:
         email = jwt.decode(token, cfg.server.secret_key, algorithms="HS256")["user"]
     except Exception as error:
@@ -518,7 +658,61 @@ def info():
 
 
 @app.route("/users/logout", methods=["POST"])
+@swag_from({
+    "summary": "Выход пользователя из системы",
+    "tags": ["users"],
+    "produces": ["application/json"],
+    "parameters": [
+        {
+            "name": "Authorization",
+            "in": "header",
+            "type": "string",
+            "required": True,
+            "description": "JWT токен авторизации с префиксом Bearer"
+        }
+    ],
+    "responses": {
+        200: {
+            "description": "Успешный выход из системы",
+            "schema": {
+                "type": "object",
+                "properties": {}
+            }
+        },
+        401: {
+            "description": "Недействительный или истекший токен",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "error": {"type": "string"}
+                }
+            }
+        },
+        403: {
+            "description": "Пользователь не авторизован",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "error": {"type": "string"}
+                }
+            }
+        }
+    }
+})
 def logout():
+    bearer = request.headers.get("Authorization")
+    if not bearer:
+        return jsonify({"error": "user is not authorized"}), 403
+    data = bearer.split()
+    if len(data) != 2:
+        return jsonify({"error": "token is missing"}), 403
+    token = data[1]
+    if not token:
+        return jsonify({"error": "token is missing"}), 403
+    if not check_jwt(cfg.redis, token):
+        return jsonify({"error": "token is invalid/expired"}), 401
+    delete_jwt(cfg.redis, token)
+    logout_user()
     return jsonify({}), 200
 
 
@@ -647,7 +841,7 @@ def register():
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "responses": {
@@ -760,14 +954,14 @@ def new_channel():
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         },
         {
             "name": "Authorization",
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "security": [{"Bearer": []}],
@@ -854,7 +1048,7 @@ def find_all_channels():
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "responses": {
@@ -974,7 +1168,7 @@ def get_channel(channel_id: str):
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "responses": {
@@ -1055,7 +1249,7 @@ def patch_channel(channel_id: str):
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "responses": {
@@ -1191,7 +1385,7 @@ def delete_channel(channel_id: str):
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "responses": {
@@ -1208,7 +1402,7 @@ def delete_channel(channel_id: str):
                             "name": {"type": "string"},
                             "description": {"type": "string"},
                             "keywords": {"type": "array", "items": {"type": "string"}},
-                            "interval": {"type": "integer"},
+                            "interval": {"type": "string"},
                             "starts_from": {"type": "integer"},
                             "make_screenshot": {"type": "boolean"},
                             "polygon": {"type": "object"}
@@ -1385,7 +1579,7 @@ def new_resource():
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "responses": {
@@ -1411,7 +1605,7 @@ def new_resource():
                                 "items": {"type": "string"},
                                 "description": "Ключевые слова для мониторинга"
                             },
-                            "interval": {"type": "integer", "description": "Интервал проверки ресурса в секундах"},
+                            "interval": {"type": "string", "description": "Интервал проверки ресурса в формате cron выражения"},
                             "starts_from": {"type": "integer", "description": "Unix timestamp времени начала мониторинга"},
                             "make_screenshot": {"type": "boolean", "description": "Флаг создания и сравнения скриншотов"},
                             "enabled": {"type": "boolean", "description": "Статус активности ресурса"},
@@ -1575,7 +1769,7 @@ def get_resource(resource_id: str):
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "responses": {
@@ -1649,10 +1843,13 @@ def patch_resorce(resource_id: str):
         interval = get_interval(interval)
     enabled = body.get("enabled")
     polygon = body.get("areas")
-    if isinstance(polygon, list):
-        polygon[0]['sensitivity'] = resource.polygon[0]['sensitivity']
-    else:
-        polygon['sensitivity'] = resource.polygon['sensitivity']
+    if polygon is not None:
+        if type(polygon) != type(resource.polygon):
+            return jsonify({"error": "polygon is invalid"}), 400
+        if isinstance(polygon, list) and len(resource.polygon) > 0:
+            polygon[0]['sensitivity'] = resource.polygon[0]['sensitivity']
+        else:
+            polygon['sensitivity'] = resource.polygon['sensitivity']
     if polygon is None:
         polygon = resource.polygon
     channels = body.get("channels")
@@ -1665,10 +1862,8 @@ def patch_resorce(resource_id: str):
                 return jsonify({"error": f"channel {channel_id} not found"}), 404
     
     sensitivity = body.get("sensitivity")
-    if polygon is None and sensitivity is not None:
-        return jsonify({"error": "sensitivity and polygon are mutually exclusive"}), 400
     if sensitivity is not None:
-        if not isinstance(sensitivity, float) or (sensitivity < 0 or sensitivity > 100):
+        if (not isinstance(sensitivity, float) and not isinstance(sensitivity, int)) or (sensitivity < 0 or sensitivity > 100):
             return jsonify({"error": "sensitivity is invalid"}), 400
         polygon['sensitivity'] = sensitivity
 
@@ -1796,7 +1991,7 @@ def patch_resorce(resource_id: str):
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "responses": {
@@ -1868,7 +2063,7 @@ def delete_resource(resource_id: str):
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "responses": {
@@ -1896,7 +2091,7 @@ def delete_resource(resource_id: str):
                                     "items": {"type": "string"},
                                     "description": "Ключевые слова для мониторинга"
                                 },
-                                "interval": {"type": "integer", "description": "Интервал проверки ресурса в секундах"},
+                                "interval": {"type": "string", "description": "Интервал проверки ресурса в формате cron-выражения"},
                                 "starts_from": {"type": "integer", "description": "Unix timestamp времени начала мониторинга"},
                                 "make_screenshot": {"type": "boolean", "description": "Флаг создания и сравнения скриншотов"},
                                 "enabled": {"type": "boolean", "description": "Статус активности ресурса"},
@@ -1996,7 +2191,7 @@ def all_resources():
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "responses": {
@@ -2111,7 +2306,7 @@ def add_channel_to_resource():
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "responses": {
@@ -2222,7 +2417,7 @@ def remove_channel_from_resource():
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "responses": {
@@ -2314,7 +2509,7 @@ def get_channels_by_resource(resource_id: str):
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "responses": {
@@ -2328,11 +2523,11 @@ def get_channels_by_resource(resource_id: str):
                         "description": "Данные о событии мониторинга",
                         "properties": {
                             "id": {"type": "string", "format": "uuid", "description": "Уникальный идентификатор события"},
+                            "snapshot_id": {"type": "string", "format": "uuid", "description": "Идентификатор снапшота события"},
                             "resource_id": {"type": "string", "format": "uuid", "description": "Идентификатор ресурса"},
                             "timestamp": {"type": "string", "format": "date-time", "description": "Время возникновения события"},
                             "type": {"type": "string", "description": "Тип события мониторинга"},
                             "status": {"type": "string", "description": "Статус события"},
-                            "details": {"type": "object", "description": "Дополнительная информация о событии"}
                         }
                     }
                 }
@@ -2420,7 +2615,7 @@ def get_event(event_id: str):
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "responses": {
@@ -2503,7 +2698,7 @@ def update_event(event_id: str):
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "responses": {
@@ -2576,7 +2771,7 @@ def get_event_snapshot(snapshot_id: str):
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "responses": {
@@ -2648,7 +2843,7 @@ def get_event_text(snapshot_id: str):
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "responses": {
@@ -2720,7 +2915,7 @@ def get_event_html(snapshot_id: str):
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "responses": {
@@ -2804,7 +2999,7 @@ def get_event_last_snapshot_id(resource_id: str):
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "responses": {
@@ -2909,7 +3104,7 @@ def get_snapshot_times(resource_id: str):
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "responses": {
@@ -3013,7 +3208,7 @@ def get_screenshot():
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "responses": {
@@ -3129,7 +3324,7 @@ def get_filtred_events():
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "responses": {
@@ -3289,7 +3484,7 @@ def generate_repot():
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "responses": {
@@ -3445,7 +3640,7 @@ def get_events_list():
             "in": "header",
             "required": True,
             "type": "string",
-            "description": "JWT токен в формате 'Bearer {token}'"
+            "description": "JWT токен в формате 'bearer: {token}'"
         }
     ],
     "produces": ["application/json"],
