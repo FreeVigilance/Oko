@@ -28,6 +28,7 @@ import {
     useNavigate,
     useRouter,
 } from '@tanstack/react-router';
+import _ from 'lodash';
 
 import type { SecondaryPageAction } from '~/components/AppLayout/PageActionsContext';
 import { Id } from '~/components/Id';
@@ -70,7 +71,7 @@ function RouteComponent() {
     });
 
     const { data: events, ...eventsQuery } = useQueryData(listEventsSource, {
-        resourceId,
+        resourceId: resourceId,
     });
 
     const { data: allChannels } = useQueryData(listChannelsSource, {
@@ -114,7 +115,7 @@ function RouteComponent() {
                 value: date?.format(PROJECT_FORMAT) ?? null,
             },
             {
-                name: t('resources.status'),
+                name: t('resources.statusName'),
                 value: <ResourceStatus enabled={enabled} startDate={date} />,
             },
             {
@@ -192,7 +193,7 @@ function RouteComponent() {
     const secondaryActions: SecondaryPageAction[] = useMemo(
         () => [
             {
-                text: t('resources.snapshots'),
+                text: t('resources.snapshotsName'),
                 icon: Camera,
                 onClick: () => {
                     void router.navigate({
@@ -202,7 +203,7 @@ function RouteComponent() {
                 },
             },
             {
-                text: t('resources.events'),
+                text: t('resources.eventsName'),
                 icon: ClockArrowRotateLeft,
                 onClick: () => {
                     void router.navigate({
@@ -251,6 +252,10 @@ function RouteComponent() {
         [resource?.resource, handleError, resourceId, router],
     );
 
+    const filteredEvents = useMemo(() => {
+        return _.orderBy(events, ['created_at'], ['desc']).slice(0, 15);
+    }, [events]);
+
     return (
         <Page
             title={resource?.resource?.name ?? ''}
@@ -277,17 +282,15 @@ function RouteComponent() {
                     </DefinitionList>
                 </div>
 
-                <Text variant="subheader-2">
-                    {t('resources.lastEvents')}
-                </Text>
+                <Text variant="subheader-2">{t('resources.lastEvents')}</Text>
                 <DataLoader
                     error={eventsQuery.error}
                     status={eventsQuery.status}
                     errorAction={eventsQuery.refetch}
                 >
-                    {events?.length && events.length > 0 ? (
+                    {filteredEvents?.length > 0 ? (
                         <EventsTable
-                            data={events ?? []}
+                            data={filteredEvents}
                             columns={eventColumns}
                             onRowClick={onRowClick}
                         />
@@ -296,9 +299,7 @@ function RouteComponent() {
                             image={<NotFound />}
                             title={t('resources.noEvents')}
                             size="m"
-                            description={t(
-                                'resources.noEventsDescription',
-                            )}
+                            description={t('resources.noEventsDescription')}
                         />
                     )}
                 </DataLoader>

@@ -19,9 +19,14 @@ export const snapshot = {
     getSnapshot: ({ id }: GetSnapshotRequest) => {
         return api.get<GetSnapshotResponse>(`snapshots/${id}`).json();
     },
-    listSnapshotTimes: ({ id }: GetSnapshotTimesRequest) => {
+    listSnapshotTimes: ({ id, offset, limit }: GetSnapshotTimesRequest) => {
         return api
-            .get<GetSnapshotTimesResponse>(`resources/${id}/snapshot_times`)
+            .get<GetSnapshotTimesResponse>(`resources/${id}/snapshot_times`, {
+                searchParams: {
+                    ...(offset !== undefined && { offset }),
+                    ...(limit !== undefined && { limit }),
+                },
+            })
             .json();
     },
     getLastSnapshotId: ({ id }: GetLastSnapshotIdRequest) => {
@@ -33,14 +38,17 @@ export const snapshot = {
         const promises = [
             api.get<GetHtmlResponse>(`events/${id}/html`).json(),
             api.get<GetTextResponse>(`events/${id}/text`).json(),
-            api.get<GetScreenshotResponse>(`events/${id}/screenshot`).json(),
+            api
+                .get<GetScreenshotResponse>(`events/${id}/screenshot`)
+                .json()
+                .catch(() => null),
         ];
 
         return Promise.all(promises).then(([html, text, screenshot]) => {
             return {
                 html: html as GetHtmlResponse,
                 text: text as GetTextResponse,
-                screenshot: screenshot as GetScreenshotResponse,
+                screenshot: screenshot as GetScreenshotResponse | null,
             };
         });
     },

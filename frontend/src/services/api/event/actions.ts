@@ -6,7 +6,9 @@ import type {
     ListEventsResponse,
     ListEventsRequest,
     ListFilteredEventsRequest,
+    DownloadEventsCsvRequest,
     ListFilteredEventsResponse,
+    UpdateStatusRequest,
 } from './types';
 
 const api = getProtectedKyInstance();
@@ -21,7 +23,7 @@ export const event = {
             })
             .json();
     },
-    listFilteredEvents: ({
+    listFilteredEventsReal: ({
         resourceId,
         type,
         from,
@@ -31,14 +33,54 @@ export const event = {
             .post<ListFilteredEventsResponse>(`events/filter`, {
                 json: {
                     resource_ids: [resourceId],
-                    event_type: type,
+                    ...(type && { event_type: type }),
                     ...(from && { start_time: from }),
                     ...(to && { end_time: to }),
                 },
             })
             .json();
     },
+    listFilteredEvents: async ({
+        resourceId,
+        type,
+        from,
+        to,
+        eventIds,
+    }: ListFilteredEventsRequest) => {
+        return api
+            .post<ListFilteredEventsResponse>('events/filter', {
+                json: {
+                    resource_ids: [resourceId],
+                    ...(type && { event_type: type }),
+                    ...(from && { start_time: from }),
+                    ...(to && { end_time: to }),
+                    ...(eventIds &&
+                        eventIds.length > 0 && { event_ids: eventIds }),
+                },
+            })
+            .json();
+    },
     getEvent: ({ id }: GetEventRequest) => {
         return api.get<GetEventResponse>(`events/${id}`).json();
+    },
+    updateStatus: async ({ id, status }: UpdateStatusRequest) => {
+        return api.patch(`events/${id}`, {
+            json: {
+                status,
+            },
+        });
+    },
+    downloadEventsCsv: async ({
+        eventIds,
+        snapshotIds,
+    }: DownloadEventsCsvRequest) => {
+        return api
+            .post('report', {
+                json: {
+                    ...(eventIds && { event_ids: eventIds }),
+                    ...(snapshotIds && { snapshot_ids: snapshotIds }),
+                },
+            })
+            .blob();
     },
 };

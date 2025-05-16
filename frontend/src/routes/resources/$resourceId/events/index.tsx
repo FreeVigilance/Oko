@@ -15,12 +15,17 @@ import { createFileRoute, useRouter } from '@tanstack/react-router';
 
 import { Page } from '~/components/Page';
 import { listFilteredEventsSource } from '~/data-sources';
+import { useApiError } from '~/hooks/toasters';
 import { WithAuth } from '~/packages/middlewares/WithAuth';
+import { api } from '~/services/api';
 import type { Event } from '~/services/api/event';
 import { DataLoader } from '~/services/data-source';
+import { t } from '~/services/i18n';
+import { toaster } from '~/services/toaster';
 
 import { Filters } from './-components/Filters';
 import { eventColumns } from './-components/templates';
+import { downloadReport } from './-utils';
 
 import type { EventFilter } from './-components/Filters/types';
 
@@ -30,6 +35,7 @@ const EventsTable = withTableSorting(
 
 function RouteComponent() {
     const router = useRouter();
+    const handleError = useApiError();
 
     const { resourceId } = Route.useParams();
     const [filters, setFilters] = useState<EventFilter | null>(null);
@@ -37,9 +43,10 @@ function RouteComponent() {
 
     const eventsQuery = useQueryData(listFilteredEventsSource, {
         resourceId: resourceId,
-        type: filters?.types[0] ?? 'keyword',
+        type: filters?.types[0],
         from: filters?.dateFrom ?? 0,
         to: filters?.dateTo ?? 0,
+        eventIds: ids,
     });
 
     const onRowClick = useCallback(
@@ -57,20 +64,41 @@ function RouteComponent() {
             {
                 text: 'Создать отчет',
                 disabled: ids.length === 0,
-                onClick: () => {
-                    console.log(ids);
+                onClick: async () => {
+                    await api.event
+                        .downloadEventsCsv({
+                            eventIds: ids,
+                        })
+                        .then((response) => {
+                            toaster.add({
+                                name: 'events-csv',
+                                title: t(
+                                    'resources.events.createReportSuccess',
+                                ),
+                                content: t(
+                                    'resources.events.createReportSuccessMessage',
+                                ),
+                                theme: 'success',
+                            });
+
+                            downloadReport(response);
+                        })
+                        .catch(handleError);
                 },
             },
         ],
-        [ids],
+        [handleError, ids],
     );
 
     return (
-        <Page title="События ресурса" primaryActions={primaryActions}>
+        <Page
+            title={t('resources.events.title')}
+            primaryActions={primaryActions}
+        >
             <Filters
                 setFilters={setFilters}
                 initialValues={{
-                    types: ['keyword'],
+                    types: [],
                     dateFrom: dateTimeParse('now')!.subtract(7, 'day'),
                     dateTo: dateTimeParse('now')!,
                 }}
@@ -88,12 +116,13 @@ function RouteComponent() {
                         onSelectionChange={setIds}
                         selectedIds={ids}
                         onRowClick={onRowClick}
+                        getRowId={(item) => item.id}
                     />
                 ) : (
                     <PlaceholderContainer
                         image={<Database />}
-                        title="Событий еще нет"
-                        description="События появятся после создания ресурса"
+                        title={t('resources.events.noEvents')}
+                        description={t('resources.events.noEventsDescription')}
                     />
                 )}
             </DataLoader>

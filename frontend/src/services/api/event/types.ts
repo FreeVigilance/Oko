@@ -26,11 +26,22 @@ export interface Event {
 
 export interface ListFilteredEventsRequest {
     resourceId: string;
-    type: 'keyword' | 'image';
-    from: number;
-    to: number;
+    type?: 'keyword' | 'image';
+    from?: number;
+    to?: number;
+    eventIds?: string[];
 }
 
 export interface ListFilteredEventsResponse {
     events: Event[];
+}
+
+export interface DownloadEventsCsvRequest {
+    eventIds?: string[];
+    snapshotIds?: string[];
+}
+
+export interface UpdateStatusRequest {
+    id: string;
+    status: Event['status'];
 }

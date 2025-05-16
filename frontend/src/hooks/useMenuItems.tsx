@@ -5,10 +5,13 @@ import {
     Database,
     House,
     Megaphone,
+    PersonPlus,
     Persons,
     PersonXmark,
 } from '@gravity-ui/icons';
 import { useMatches, useNavigate, useRouter } from '@tanstack/react-router';
+
+import { t } from '~/services/i18n';
 
 import { useAuth } from './useAuth';
 
@@ -34,7 +37,7 @@ export const useMenuItems = () => {
         const items: Item[] = [
             {
                 id: 'id',
-                title: 'Главная',
+                title: t('menu.home'),
                 icon: House,
                 current: true,
                 to: '/',
@@ -43,13 +46,13 @@ export const useMenuItems = () => {
                 ? [
                       {
                           id: 'resources',
-                          title: 'Ресурсы',
+                          title: t('menu.resources'),
                           icon: Database,
                           to: '/resources/',
                       },
                       {
                           id: 'channels',
-                          title: 'Каналы оповещения',
+                          title: t('menu.channels'),
                           icon: Megaphone,
                           to: '/channels/',
                       },
@@ -74,25 +77,37 @@ export const useMenuItems = () => {
         const items = [
             ...(auth.user
                 ? [
+                      ...(auth.user.is_admin
+                          ? [
+                                {
+                                    title: t('menu.userManagement'),
+                                    icon: Persons,
+                                    onClick: () => {
+                                        window.open(
+                                            'http://130.193.45.10:8083/admin/',
+                                            '_blank',
+                                        );
+                                    },
+                                },
+                            ]
+                          : []),
                       {
-                          title: 'Управление пользователями',
-                          icon: Persons,
-                          onClick: () => {
-                              window.open(
-                                  'https://hse.ru/staff/users/list',
-                                  '_blank',
-                              );
-                          },
-                      },
-                      {
-                          title: 'Выйти из аккаунта',
+                          title: t('menu.logout'),
                           icon: PersonXmark,
                           onClick: () => {
                               auth.logout();
                           },
                       },
                   ]
-                : []),
+                : [
+                      {
+                          title: t('menu.login'),
+                          icon: PersonPlus,
+                          onClick: () => {
+                              auth.login();
+                          },
+                      },
+                  ]),
         ];
 
         return items;

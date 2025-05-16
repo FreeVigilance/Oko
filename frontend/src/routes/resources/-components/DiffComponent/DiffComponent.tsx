@@ -1,13 +1,7 @@
 import { Fragment, useState } from 'react';
 
-import {
-    spacing,
-    Tab,
-    TabList,
-    TabPanel,
-    TabProvider,
-    Text,
-} from '@gravity-ui/uikit';
+import { Tab, TabList, TabPanel, TabProvider, Text } from '@gravity-ui/uikit';
+import block from 'bem-cn-lite';
 import {
     ReactCompareSlider,
     ReactCompareSliderImage,
@@ -15,6 +9,10 @@ import {
 import ReactDiffViewer from 'react-diff-viewer';
 import SyntaxHighlighter from 'react-syntax-highlighter';
 import { darcula } from 'react-syntax-highlighter/dist/esm/styles/hljs';
+
+import './DiffComponent.scss';
+
+const b = block('diff-component');
 
 export const DiffComponent = ({
     html,
@@ -29,8 +27,8 @@ export const DiffComponent = ({
     oldHtml: string;
     text: string;
     oldText: string;
-    screenshot: string;
-    oldScreenshot: string;
+    screenshot: string | null;
+    oldScreenshot: string | null;
     isFirst: boolean;
 }) => {
     const [activeTab, setActiveTab] = useState('text');
@@ -41,42 +39,46 @@ export const DiffComponent = ({
                 {isFirst ? (
                     <Fragment>
                         <Tab value="text">Только текст</Tab>
-                        <Tab value="image">Только скриншот</Tab>
+                        {screenshot && <Tab value="image">Только скриншот</Tab>}
                         <Tab value="html">Только HTML</Tab>
                     </Fragment>
                 ) : (
                     <Fragment>
                         <Tab value="textDiff">Изменения в тексте</Tab>
                         <Tab value="text">Только текст</Tab>
-                        <Tab value="imageDiff">Изменения в скриншотах</Tab>
-                        <Tab value="image">Только скриншот</Tab>
+                        {screenshot && oldScreenshot && (
+                            <Tab value="imageDiff">Изменения в скриншотах</Tab>
+                        )}
+                        {screenshot && <Tab value="image">Только скриншот</Tab>}
                         <Tab value="htmlDiff">Изменения в HTML</Tab>
                         <Tab value="html">Только HTML</Tab>
                     </Fragment>
                 )}
             </TabList>
 
-            <div className={spacing({ mt: 3 })}>
+            <div className={b()}>
                 <TabPanel value="imageDiff">
-                    {activeTab === 'imageDiff' && (
-                        <ReactCompareSlider
-                            itemOne={
-                                <ReactCompareSliderImage
-                                    src={oldScreenshot}
-                                    alt="Old screenshot"
-                                />
-                            }
-                            itemTwo={
-                                <ReactCompareSliderImage
-                                    src={screenshot}
-                                    alt="New screenshot"
-                                />
-                            }
-                        />
-                    )}
+                    {activeTab === 'imageDiff' &&
+                        oldScreenshot &&
+                        screenshot && (
+                            <ReactCompareSlider
+                                itemOne={
+                                    <ReactCompareSliderImage
+                                        src={oldScreenshot}
+                                        alt="Old screenshot"
+                                    />
+                                }
+                                itemTwo={
+                                    <ReactCompareSliderImage
+                                        src={screenshot}
+                                        alt="New screenshot"
+                                    />
+                                }
+                            />
+                        )}
                 </TabPanel>
                 <TabPanel value="image">
-                    {activeTab === 'image' && (
+                    {activeTab === 'image' && screenshot && (
                         <img
                             src={screenshot}
                             alt="New screenshot"
